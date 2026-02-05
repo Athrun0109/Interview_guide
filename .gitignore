@@ -1,0 +1,50 @@
+# Environment and secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.venv/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# Audio/Video files (test data)
+*.wav
+*.mp3
+*.mp4
+*.m4a
+*.webm
+*.ogg
+*.tmp
+data/
+videos/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Windows
+nul
+Thumbs.db
+Desktop.ini
+
+# Mac
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test script
+test_transcribe.py

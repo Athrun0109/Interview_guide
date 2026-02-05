@@ -1,0 +1,3 @@
+conda activate interview_guide
+cd C:\Users\Admin\Documents\workspace\Interview_guide
+streamlit run app.py
