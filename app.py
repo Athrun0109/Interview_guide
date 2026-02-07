@@ -1,10 +1,11 @@
+import re
 import streamlit as st
 
 from config import load_env_keys
 from modules.transcriber import transcribe_and_diarize, format_transcript, WHISPER_MODELS
 from modules.searcher import search_company
 from modules.analyzer import analyze_interview, GEMINI_MODELS
-from modules.prompts import AnalysisMode, determine_mode
+from modules.prompts import AnalysisMode, determine_mode, build_exportable_prompt
 import config
 
 st.set_page_config(page_title="AI Interview Analyzer", layout="wide")
@@ -38,6 +39,10 @@ for key, default in {
     "formatted_transcript": None,
     "analysis_report": None,
     "step": 1,
+    "job_title": "",
+    "job_description": "",
+    "company_name": "",
+    "is_rejected": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -123,10 +128,44 @@ if st.session_state.transcription_result and st.session_state.step >= 2:
 if st.session_state.speaker_map and st.session_state.step >= 3:
     st.header("Step 3: Job Information")
 
-    company_name = st.text_input("Company name (optional)")
-    job_title = st.text_input("Job title")
-    job_description = st.text_area("Job description / requirements", height=150)
-    is_rejected = st.checkbox("I was rejected for this position")
+    company_name = st.text_input("Company name (optional)", value=st.session_state.company_name)
+    job_title = st.text_input("Job title", value=st.session_state.job_title)
+    job_description = st.text_area("Job description / requirements", height=150, value=st.session_state.job_description)
+    is_rejected = st.checkbox("I was rejected for this position", value=st.session_state.is_rejected)
+
+    # Save to session state
+    st.session_state.company_name = company_name
+    st.session_state.job_title = job_title
+    st.session_state.job_description = job_description
+    st.session_state.is_rejected = is_rejected
+
+    # ── Export Prompt Button ──────────────────────────────────────
+    st.divider()
+    st.subheader("Export for Other LLMs")
+    st.caption("Copy this prompt to use with ChatGPT, Claude, or any other LLM.")
+
+    if st.session_state.formatted_transcript and job_title:
+        result = st.session_state.transcription_result
+        exportable_prompt = build_exportable_prompt(
+            transcript=st.session_state.formatted_transcript,
+            job_title=job_title,
+            job_description=job_description,
+            company_name=company_name,
+            is_rejected=is_rejected,
+            detected_language=result.detected_language,
+        )
+
+        # Show prompt in a text area for easy copying
+        with st.expander("View Full Prompt", expanded=False):
+            st.text_area(
+                "Complete prompt with all interview details",
+                value=exportable_prompt,
+                height=400,
+                key="exportable_prompt_display",
+            )
+            st.info(f"Prompt length: {len(exportable_prompt):,} characters")
+    else:
+        st.warning("Please enter a job title to generate the exportable prompt.")
 
     if st.session_state.step < 4:
         st.session_state.step = 4
@@ -148,24 +187,24 @@ if st.session_state.step >= 4:
     if st.button("Analyze Interview"):
         if not gemini_key:
             st.error("Gemini API Key is required.")
-        elif not job_title:
+        elif not st.session_state.job_title:
             st.error("Please enter a job title.")
         else:
             # Determine mode
             search_summary = ""
-            mode = determine_mode(is_rejected, company_name, search_summary)
+            mode = determine_mode(st.session_state.is_rejected, st.session_state.company_name, search_summary)
 
             # Search company if applicable
-            if company_name and mode != AnalysisMode.FAILURE:
+            if st.session_state.company_name and mode != AnalysisMode.FAILURE:
                 with st.spinner("Searching company background..."):
-                    search_summary = search_company(company_name, job_title, serper_key)
+                    search_summary = search_company(st.session_state.company_name, st.session_state.job_title, serper_key)
                 # Re-determine mode with search result
-                mode = determine_mode(is_rejected, company_name, search_summary)
+                mode = determine_mode(st.session_state.is_rejected, st.session_state.company_name, search_summary)
 
             # For FAILURE mode, still try to get company info if available
-            if mode == AnalysisMode.FAILURE and company_name and serper_key:
+            if mode == AnalysisMode.FAILURE and st.session_state.company_name and serper_key:
                 with st.spinner("Searching company background..."):
-                    search_summary = search_company(company_name, job_title, serper_key)
+                    search_summary = search_company(st.session_state.company_name, st.session_state.job_title, serper_key)
 
             st.info(f"Analysis mode: **{mode.value}**")
 
@@ -173,19 +212,103 @@ if st.session_state.step >= 4:
                 result = st.session_state.transcription_result
                 report = analyze_interview(
                     transcript=st.session_state.formatted_transcript,
-                    job_title=job_title,
-                    job_description=job_description,
+                    job_title=st.session_state.job_title,
+                    job_description=st.session_state.job_description,
                     mode=mode,
                     api_key=gemini_key,
                     model=gemini_model,
                     detected_language=result.detected_language,
-                    company_name=company_name,
+                    company_name=st.session_state.company_name,
                     search_summary=search_summary,
                 )
                 st.session_state.analysis_report = report
 
-    # Display report
+    # Display report with collapsible sections
     if st.session_state.analysis_report:
         st.divider()
-        st.subheader("Analysis Report")
-        st.markdown(st.session_state.analysis_report)
+        report = st.session_state.analysis_report
+
+        # Parse the report into sections
+        sections = {
+            "overall": "",
+            "qa": "",
+            "focus": "",
+            "suggestions": "",
+            "went_well": "",
+        }
+
+        # Extract Overall Impression (always show)
+        overall_match = re.search(
+            r"###?\s*Overall Impression\s*\n(.*?)(?=\n###?\s*|\Z)",
+            report,
+            re.DOTALL | re.IGNORECASE
+        )
+        if overall_match:
+            sections["overall"] = overall_match.group(1).strip()
+
+        # Extract Q&A Breakdown
+        qa_match = re.search(
+            r"###?\s*Q&A Breakdown.*?\s*\n(.*?)(?=\n###?\s*|\Z)",
+            report,
+            re.DOTALL | re.IGNORECASE
+        )
+        if qa_match:
+            sections["qa"] = qa_match.group(1).strip()
+
+        # Extract Interviewer's Focus
+        focus_match = re.search(
+            r"###?\s*Interviewer'?s? Focus.*?\s*\n(.*?)(?=\n###?\s*|\Z)",
+            report,
+            re.DOTALL | re.IGNORECASE
+        )
+        if focus_match:
+            sections["focus"] = focus_match.group(1).strip()
+
+        # Extract Improvement Suggestions
+        suggestions_match = re.search(
+            r"###?\s*Improvement Suggestions?\s*\n(.*?)(?=\n###?\s*|\Z)",
+            report,
+            re.DOTALL | re.IGNORECASE
+        )
+        if suggestions_match:
+            sections["suggestions"] = suggestions_match.group(1).strip()
+
+        # Extract What Went Well (for FAILURE mode)
+        went_well_match = re.search(
+            r"###?\s*What Went Well\s*\n(.*?)(?=\n###?\s*|\Z)",
+            report,
+            re.DOTALL | re.IGNORECASE
+        )
+        if went_well_match:
+            sections["went_well"] = went_well_match.group(1).strip()
+
+        # Display sections
+        st.subheader("Overall Impression")
+        if sections["overall"]:
+            st.markdown(sections["overall"])
+        else:
+            # Fallback: show first paragraph if parsing failed
+            first_para = report.split("\n\n")[0] if "\n\n" in report else report[:500]
+            st.markdown(first_para)
+
+        # Collapsible detailed sections
+        if sections["qa"]:
+            with st.expander("Q&A Breakdown and Analysis", expanded=False):
+                st.markdown(sections["qa"])
+
+        if sections["went_well"]:
+            with st.expander("What Went Well", expanded=False):
+                st.markdown(sections["went_well"])
+
+        if sections["focus"]:
+            with st.expander("Interviewer's Focus Areas", expanded=False):
+                st.markdown(sections["focus"])
+
+        if sections["suggestions"]:
+            with st.expander("Improvement Suggestions", expanded=False):
+                st.markdown(sections["suggestions"])
+
+        # Fallback: show full report if parsing failed
+        if not any([sections["qa"], sections["focus"], sections["suggestions"]]):
+            with st.expander("Full Analysis Report", expanded=True):
+                st.markdown(report)

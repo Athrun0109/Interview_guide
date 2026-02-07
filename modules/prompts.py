@@ -25,12 +25,20 @@ Job Requirements:
 ## Interview Transcript
 {transcript}
 
-## Analysis Requirements
-1. Break the interview into individual Q&A exchanges.
-2. For each exchange, give a qualitative rating (Good / Neutral / Bad) with a one or two sentence explanation.
-   - Criteria: relevance to the question, demonstration of skills required by the job, clarity and structure of expression.
-3. Infer the interviewer's focus areas and questioning logic.
-4. Provide 3 specific, actionable improvement suggestions for the next round of interviews.
+## Output Format
+Structure your response with these exact section headers:
+
+### Overall Impression
+(2-3 sentences summarizing the candidate's overall performance)
+
+### Q&A Breakdown and Analysis
+(Break the interview into individual Q&A exchanges. For each exchange, give a qualitative rating Good/Neutral/Bad with explanation)
+
+### Interviewer's Focus Areas
+(Infer the interviewer's focus areas and questioning logic)
+
+### Improvement Suggestions
+(Provide 3 specific, actionable improvement suggestions)
 
 {language_instruction}
 Be professional but not stiff.
@@ -46,12 +54,20 @@ Job Requirements:
 ## Interview Transcript
 {transcript}
 
-## Analysis Requirements
-1. Break the interview into individual Q&A exchanges.
-2. For each exchange, give a qualitative rating (Good / Neutral / Bad) with a one or two sentence explanation.
-   - Criteria: relevance to the question, demonstration of skills required by the job, clarity and structure of expression.
-3. Infer the interviewer's focus areas and questioning logic.
-4. Provide 3 specific, actionable improvement suggestions for the next round of interviews.
+## Output Format
+Structure your response with these exact section headers:
+
+### Overall Impression
+(2-3 sentences summarizing the candidate's overall performance)
+
+### Q&A Breakdown and Analysis
+(Break the interview into individual Q&A exchanges. For each exchange, give a qualitative rating Good/Neutral/Bad with explanation)
+
+### Interviewer's Focus Areas
+(Infer the interviewer's focus areas and questioning logic)
+
+### Improvement Suggestions
+(Provide 3 specific, actionable improvement suggestions)
 
 {language_instruction}
 Be professional but not stiff.
@@ -69,16 +85,76 @@ Job Requirements:
 ## Interview Transcript
 {transcript}
 
-## Analysis Requirements
-1. **Interview Summary**: Briefly summarize the overall interview flow and key discussion points.
-2. **Detailed Q&A Analysis**: Break the interview into individual Q&A exchanges. For each exchange, give a qualitative rating (Good / Neutral / Bad) with a one or two sentence explanation.
-3. **Key Improvement Areas**: Identify the 3 most important areas where the candidate can improve, with specific examples from the transcript and concrete suggestions.
-4. **What Went Well**: Highlight the positive aspects of the candidate's performance — these are strengths to carry forward.
-5. **Encouragement**: End with a brief, genuine message of encouragement. Remind the candidate that every interview is a learning opportunity and they are making progress.
+## Output Format
+Structure your response with these exact section headers:
+
+### Overall Impression
+(2-3 sentences summarizing the interview and providing encouragement)
+
+### Q&A Breakdown and Analysis
+(Break the interview into individual Q&A exchanges. For each exchange, give a qualitative rating Good/Neutral/Bad with explanation)
+
+### What Went Well
+(Highlight the positive aspects — strengths to carry forward)
+
+### Improvement Suggestions
+(Identify 3 key improvement areas with specific examples and concrete suggestions)
 
 {language_instruction}
 Be warm, supportive, and constructive. Focus on growth rather than shortcomings.
 """
+
+
+EXPORTABLE_PROMPT_TEMPLATE = """I just finished a job interview and would like your help analyzing my performance.
+
+## Position Information
+- Position: {job_title}
+- Company: {company_name}
+{job_description_section}
+
+## Interview Status
+{status_note}
+
+## Full Interview Transcript
+{transcript}
+
+## What I Need
+Please analyze this interview and provide:
+1. Overall impression of my performance (2-3 sentences)
+2. Breakdown of each Q&A exchange with ratings (Good/Neutral/Bad) and brief explanations
+3. The interviewer's apparent focus areas and questioning strategy
+4. 3 specific, actionable suggestions for improvement
+
+{language_instruction}
+"""
+
+
+def build_exportable_prompt(
+    transcript: str,
+    job_title: str,
+    job_description: str,
+    company_name: str,
+    is_rejected: bool,
+    detected_language: str = "en",
+) -> str:
+    """Build a self-contained prompt that users can copy to any LLM."""
+    lang_key = detected_language if detected_language in LANGUAGE_INSTRUCTIONS else "en"
+    language_instruction = LANGUAGE_INSTRUCTIONS[lang_key]
+
+    job_description_section = ""
+    if job_description:
+        job_description_section = f"- Job Requirements:\n{job_description}"
+
+    status_note = "I was rejected for this position. Please be supportive while giving honest feedback." if is_rejected else "Waiting for results or proceeding to next round."
+
+    return EXPORTABLE_PROMPT_TEMPLATE.format(
+        job_title=job_title or "Not specified",
+        company_name=company_name or "Not specified",
+        job_description_section=job_description_section,
+        status_note=status_note,
+        transcript=transcript,
+        language_instruction=language_instruction,
+    )
 
 
 def determine_mode(is_rejected: bool, company_name: str, search_summary: str) -> AnalysisMode:
