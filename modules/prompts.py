@@ -157,6 +157,56 @@ def build_exportable_prompt(
     )
 
 
+def parse_exported_prompt(prompt_text: str) -> dict:
+    """Parse an exported prompt to extract job info and transcript.
+
+    Returns a dict with keys: job_title, company_name, job_description, transcript, is_rejected
+    """
+    import re
+
+    result = {
+        "job_title": "",
+        "company_name": "",
+        "job_description": "",
+        "transcript": "",
+        "is_rejected": False,
+    }
+
+    # Extract Position
+    position_match = re.search(r"-\s*Position:\s*(.+)", prompt_text)
+    if position_match:
+        value = position_match.group(1).strip()
+        if value.lower() != "not specified":
+            result["job_title"] = value
+
+    # Extract Company
+    company_match = re.search(r"-\s*Company:\s*(.+)", prompt_text)
+    if company_match:
+        value = company_match.group(1).strip()
+        if value.lower() != "not specified":
+            result["company_name"] = value
+
+    # Extract Job Requirements
+    jd_match = re.search(r"-\s*Job Requirements:\s*\n(.*?)(?=\n##|\Z)", prompt_text, re.DOTALL)
+    if jd_match:
+        result["job_description"] = jd_match.group(1).strip()
+
+    # Extract Interview Status (check if rejected)
+    if "rejected" in prompt_text.lower() and "was rejected" in prompt_text.lower():
+        result["is_rejected"] = True
+
+    # Extract Transcript
+    transcript_match = re.search(
+        r"##\s*Full Interview Transcript\s*\n(.*?)(?=\n##\s*What I Need|\Z)",
+        prompt_text,
+        re.DOTALL
+    )
+    if transcript_match:
+        result["transcript"] = transcript_match.group(1).strip()
+
+    return result
+
+
 def determine_mode(is_rejected: bool, company_name: str, search_summary: str) -> AnalysisMode:
     """Determine which prompt mode to use.
 

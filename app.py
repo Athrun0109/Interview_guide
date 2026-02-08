@@ -1,11 +1,12 @@
 import re
 import streamlit as st
+from datetime import datetime
 
 from config import load_env_keys
 from modules.transcriber import transcribe_and_diarize, format_transcript, WHISPER_MODELS
 from modules.searcher import search_company
 from modules.analyzer import analyze_interview, GEMINI_MODELS
-from modules.prompts import AnalysisMode, determine_mode, build_exportable_prompt
+from modules.prompts import AnalysisMode, determine_mode, build_exportable_prompt, parse_exported_prompt
 import config
 
 st.set_page_config(page_title="AI Interview Analyzer", layout="wide")
@@ -43,53 +44,91 @@ for key, default in {
     "job_description": "",
     "company_name": "",
     "is_rejected": False,
+    "imported_from_file": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
 # ═══════════════════════════════════════════════════════════════════
-# Step 1: Upload audio
+# Step 1: Upload audio OR Import previous prompt
 # ═══════════════════════════════════════════════════════════════════
 st.header("Step 1: Upload Interview Recording")
 
-uploaded_file = st.file_uploader(
-    "Upload audio or video file",
-    type=["mp4", "mp3", "wav", "m4a", "webm", "ogg"],
-)
+tab_record, tab_import = st.tabs(["New Recording", "Import Previous Session"])
 
-if uploaded_file:
-    st.audio(uploaded_file)
-
-    # Whisper model selection
-    whisper_model = st.selectbox(
-        "Whisper Model",
-        options=list(WHISPER_MODELS.keys()),
-        format_func=lambda x: WHISPER_MODELS[x],
-        index=0,  # default to large-v3-turbo
+with tab_record:
+    uploaded_file = st.file_uploader(
+        "Upload audio or video file",
+        type=["mp4", "mp3", "wav", "m4a", "webm", "ogg"],
     )
 
-    if st.button("Start Transcription"):
-        if not hf_token:
-            st.error("HuggingFace Token is required for speaker diarization.")
-        else:
-            with st.spinner(f"Transcribing with {whisper_model} and identifying speakers..."):
-                result = transcribe_and_diarize(
-                    audio_bytes=uploaded_file.getvalue(),
-                    file_name=uploaded_file.name,
-                    hf_token=hf_token,
-                    whisper_model_size=whisper_model,
-                    device=config.WHISPER_DEVICE,
-                    compute_type=config.WHISPER_COMPUTE_TYPE,
-                )
-                st.session_state.transcription_result = result
-                st.session_state.speaker_map = None
-                st.session_state.formatted_transcript = None
-                st.session_state.analysis_report = None
-                st.session_state.step = 2
+    if uploaded_file:
+        st.audio(uploaded_file)
+
+        # Whisper model selection
+        whisper_model = st.selectbox(
+            "Whisper Model",
+            options=list(WHISPER_MODELS.keys()),
+            format_func=lambda x: WHISPER_MODELS[x],
+            index=0,
+        )
+
+        if st.button("Start Transcription"):
+            if not hf_token:
+                st.error("HuggingFace Token is required for speaker diarization.")
+            else:
+                with st.spinner(f"Transcribing with {whisper_model} and identifying speakers..."):
+                    result = transcribe_and_diarize(
+                        audio_bytes=uploaded_file.getvalue(),
+                        file_name=uploaded_file.name,
+                        hf_token=hf_token,
+                        whisper_model_size=whisper_model,
+                        device=config.WHISPER_DEVICE,
+                        compute_type=config.WHISPER_COMPUTE_TYPE,
+                    )
+                    st.session_state.transcription_result = result
+                    st.session_state.speaker_map = None
+                    st.session_state.formatted_transcript = None
+                    st.session_state.analysis_report = None
+                    st.session_state.imported_from_file = False
+                    st.session_state.step = 2
+                    st.rerun()
+
+with tab_import:
+    st.caption("Load a previously exported prompt (.txt) to continue analysis or get rejection feedback.")
+
+    imported_file = st.file_uploader(
+        "Upload exported prompt file",
+        type=["txt"],
+        key="import_prompt_file",
+    )
+
+    if imported_file:
+        prompt_content = imported_file.read().decode("utf-8")
+
+        with st.expander("Preview imported content", expanded=False):
+            st.text(prompt_content[:2000] + ("..." if len(prompt_content) > 2000 else ""))
+
+        if st.button("Load This Session"):
+            parsed = parse_exported_prompt(prompt_content)
+
+            if parsed["transcript"]:
+                st.session_state.formatted_transcript = parsed["transcript"]
+                st.session_state.job_title = parsed["job_title"]
+                st.session_state.job_description = parsed["job_description"]
+                st.session_state.company_name = parsed["company_name"]
+                st.session_state.is_rejected = parsed["is_rejected"]
+                st.session_state.speaker_map = {"IMPORTED": "Candidate"}  # Dummy map
+                st.session_state.transcription_result = None  # No audio result
+                st.session_state.imported_from_file = True
+                st.session_state.step = 3
+                st.success("Session loaded! Scroll down to Job Information.")
                 st.rerun()
+            else:
+                st.error("Could not parse transcript from the file. Please check the format.")
 
 # ═══════════════════════════════════════════════════════════════════
-# Step 2: Speaker identification
+# Step 2: Speaker identification (skip if imported)
 # ═══════════════════════════════════════════════════════════════════
 if st.session_state.transcription_result and st.session_state.step >= 2:
     st.header("Step 2: Identify Yourself")
@@ -128,42 +167,85 @@ if st.session_state.transcription_result and st.session_state.step >= 2:
 if st.session_state.speaker_map and st.session_state.step >= 3:
     st.header("Step 3: Job Information")
 
+    # Show transcript preview for imported sessions
+    if st.session_state.imported_from_file and st.session_state.formatted_transcript:
+        with st.expander("Transcript preview (imported)", expanded=False):
+            st.text(st.session_state.formatted_transcript)
+
     company_name = st.text_input("Company name (optional)", value=st.session_state.company_name)
     job_title = st.text_input("Job title", value=st.session_state.job_title)
     job_description = st.text_area("Job description / requirements", height=150, value=st.session_state.job_description)
-    is_rejected = st.checkbox("I was rejected for this position", value=st.session_state.is_rejected)
+
+    # Rejected toggle button
+    st.write("")  # Spacing
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.session_state.is_rejected:
+            if st.button("I Was Rejected", type="primary", use_container_width=True):
+                st.session_state.is_rejected = False
+                st.rerun()
+        else:
+            if st.button("I Was Rejected", type="secondary", use_container_width=True):
+                st.session_state.is_rejected = True
+                st.rerun()
+    with col2:
+        if st.session_state.is_rejected:
+            st.info("Rejection mode enabled — analysis will include supportive feedback and improvement focus.")
+        else:
+            st.caption("Click if you didn't pass this interview. Analysis will adjust to provide supportive feedback.")
 
     # Save to session state
     st.session_state.company_name = company_name
     st.session_state.job_title = job_title
     st.session_state.job_description = job_description
-    st.session_state.is_rejected = is_rejected
 
-    # ── Export Prompt Button ──────────────────────────────────────
+    # ── Export Prompt ──────────────────────────────────────────────
     st.divider()
     st.subheader("Export for Other LLMs")
-    st.caption("Copy this prompt to use with ChatGPT, Claude, or any other LLM.")
+    st.caption("Save this prompt to use with ChatGPT, Claude, or reload later.")
 
     if st.session_state.formatted_transcript and job_title:
-        result = st.session_state.transcription_result
+        # Detect language (use 'en' as default for imported sessions)
+        detected_lang = "en"
+        if st.session_state.transcription_result:
+            detected_lang = st.session_state.transcription_result.detected_language
+
         exportable_prompt = build_exportable_prompt(
             transcript=st.session_state.formatted_transcript,
             job_title=job_title,
             job_description=job_description,
             company_name=company_name,
-            is_rejected=is_rejected,
-            detected_language=result.detected_language,
+            is_rejected=st.session_state.is_rejected,
+            detected_language=detected_lang,
         )
 
-        # Show prompt in a text area for easy copying
-        with st.expander("View Full Prompt", expanded=False):
-            st.text_area(
-                "Complete prompt with all interview details",
-                value=exportable_prompt,
-                height=400,
-                key="exportable_prompt_display",
+        # Generate filename
+        safe_title = re.sub(r'[^\w\-]', '_', job_title)[:30]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"interview_{safe_title}_{timestamp}.txt"
+
+        col_view, col_download = st.columns(2)
+
+        with col_view:
+            with st.expander("View Full Prompt", expanded=False):
+                st.text_area(
+                    "Complete prompt with all interview details",
+                    value=exportable_prompt,
+                    height=300,
+                    key="exportable_prompt_display",
+                )
+                st.caption(f"Length: {len(exportable_prompt):,} characters")
+
+        with col_download:
+            st.download_button(
+                label="Download as .txt",
+                data=exportable_prompt,
+                file_name=filename,
+                mime="text/plain",
+                use_container_width=True,
             )
-            st.info(f"Prompt length: {len(exportable_prompt):,} characters")
+            st.caption(f"File: {filename}")
+
     else:
         st.warning("Please enter a job title to generate the exportable prompt.")
 
@@ -181,10 +263,10 @@ if st.session_state.step >= 4:
         "Gemini Model",
         options=list(GEMINI_MODELS.keys()),
         format_func=lambda x: GEMINI_MODELS[x],
-        index=0,  # default to gemini-2.0-flash
+        index=0,
     )
 
-    if st.button("Analyze Interview"):
+    if st.button("Analyze Interview", type="primary"):
         if not gemini_key:
             st.error("Gemini API Key is required.")
         elif not st.session_state.job_title:
@@ -198,7 +280,6 @@ if st.session_state.step >= 4:
             if st.session_state.company_name and mode != AnalysisMode.FAILURE:
                 with st.spinner("Searching company background..."):
                     search_summary = search_company(st.session_state.company_name, st.session_state.job_title, serper_key)
-                # Re-determine mode with search result
                 mode = determine_mode(st.session_state.is_rejected, st.session_state.company_name, search_summary)
 
             # For FAILURE mode, still try to get company info if available
@@ -208,8 +289,12 @@ if st.session_state.step >= 4:
 
             st.info(f"Analysis mode: **{mode.value}**")
 
+            # Detect language
+            detected_lang = "en"
+            if st.session_state.transcription_result:
+                detected_lang = st.session_state.transcription_result.detected_language
+
             with st.spinner(f"Generating analysis with {gemini_model}..."):
-                result = st.session_state.transcription_result
                 report = analyze_interview(
                     transcript=st.session_state.formatted_transcript,
                     job_title=st.session_state.job_title,
@@ -217,7 +302,7 @@ if st.session_state.step >= 4:
                     mode=mode,
                     api_key=gemini_key,
                     model=gemini_model,
-                    detected_language=result.detected_language,
+                    detected_language=detected_lang,
                     company_name=st.session_state.company_name,
                     search_summary=search_summary,
                 )
@@ -287,7 +372,6 @@ if st.session_state.step >= 4:
         if sections["overall"]:
             st.markdown(sections["overall"])
         else:
-            # Fallback: show first paragraph if parsing failed
             first_para = report.split("\n\n")[0] if "\n\n" in report else report[:500]
             st.markdown(first_para)
 
