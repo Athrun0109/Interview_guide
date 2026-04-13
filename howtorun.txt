@@ -1,3 +1,15 @@
 conda activate interview_guide
 cd C:\Users\Admin\Documents\workspace\Interview_guide
 streamlit run app.py
+
+│ 预测  │ 预期规律 │             吻合度             │
+  ├───────┼──────────┼────────────────────────────────┤
+  │ 14:09 │ ~14:00   │ ✅ 非常接近                    │
+  ├───────┼──────────┼────────────────────────────────┤
+  │ 16:20 │ ~16:30   │ ✅ 非常接近      
+
+https://edu.doc.ivdrk.com/
+50460344
+SPXTX7p42
+
+3,500,000,000

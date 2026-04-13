@@ -1,4 +1,4 @@
-from google import genai
+import google.generativeai as genai
 
 from config import GEMINI_TEMPERATURE, GEMINI_MAX_OUTPUT_TOKENS
 from modules.prompts import AnalysisMode, build_prompt
@@ -34,18 +34,18 @@ def analyze_interview(
         search_summary=search_summary,
     )
 
-    client = genai.Client(
-        api_key=api_key,
-        vertexai=False,
-        http_options={"api_version": "v1beta"},
-    )
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config={
+    # Configure API key
+    genai.configure(api_key=api_key)
+
+    # Create model and generate
+    gen_model = genai.GenerativeModel(
+        model_name=model,
+        generation_config={
             "temperature": GEMINI_TEMPERATURE,
             "max_output_tokens": GEMINI_MAX_OUTPUT_TOKENS,
         },
     )
+
+    response = gen_model.generate_content(prompt)
 
     return response.text

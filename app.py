@@ -3,7 +3,7 @@ import streamlit as st
 from datetime import datetime
 
 from config import load_env_keys
-from modules.transcriber import transcribe_and_diarize, format_transcript, WHISPER_MODELS
+from modules.transcriber import transcribe_and_diarize, format_transcript, WHISPER_MODELS, SUPPORTED_LANGUAGES
 from modules.searcher import search_company
 from modules.analyzer import analyze_interview, GEMINI_MODELS
 from modules.prompts import AnalysisMode, determine_mode, build_exportable_prompt, parse_exported_prompt
@@ -73,11 +73,47 @@ with tab_record:
             index=0,
         )
 
+        # Interview language selection (JA / EN only)
+        lang_col, count_col, unsure_col = st.columns([1, 1, 1])
+        with lang_col:
+            language = st.selectbox(
+                "Interview Language",
+                options=list(SUPPORTED_LANGUAGES.keys()),
+                format_func=lambda x: SUPPORTED_LANGUAGES[x],
+                index=0,
+                help="Main language used in the interview.",
+            )
+        with count_col:
+            num_speakers_input = st.number_input(
+                "Number of participants (incl. you)",
+                min_value=2,
+                max_value=10,
+                value=2,
+                step=1,
+                help="Total people speaking in this interview.",
+            )
+        with unsure_col:
+            st.write("")  # vertical spacing
+            st.write("")
+            unsure = st.checkbox(
+                "I'm not sure",
+                value=False,
+                help="Skip the count and let the model auto-estimate.",
+            )
+
         if st.button("Start Transcription"):
             if not hf_token:
                 st.error("HuggingFace Token is required for speaker diarization.")
             else:
-                with st.spinner(f"Transcribing with {whisper_model} and identifying speakers..."):
+                resolved_num_speakers = None if unsure else int(num_speakers_input)
+
+                progress_bar = st.progress(0.0, text="Starting transcription...")
+
+                def _on_progress(label: str, fraction: float):
+                    pct = max(0, min(100, int(fraction * 100)))
+                    progress_bar.progress(fraction, text=f"{label}  ({pct}%)")
+
+                try:
                     result = transcribe_and_diarize(
                         audio_bytes=uploaded_file.getvalue(),
                         file_name=uploaded_file.name,
@@ -85,7 +121,12 @@ with tab_record:
                         whisper_model_size=whisper_model,
                         device=config.WHISPER_DEVICE,
                         compute_type=config.WHISPER_COMPUTE_TYPE,
+                        language=language,
+                        num_speakers=resolved_num_speakers,
+                        progress_cb=_on_progress,
                     )
+                finally:
+                    progress_bar.empty()
                     st.session_state.transcription_result = result
                     st.session_state.speaker_map = None
                     st.session_state.formatted_transcript = None
