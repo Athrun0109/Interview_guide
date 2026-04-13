@@ -34,6 +34,7 @@ videos/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Windows
 nul
