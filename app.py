@@ -127,13 +127,14 @@ with tab_record:
                     )
                 finally:
                     progress_bar.empty()
-                    st.session_state.transcription_result = result
-                    st.session_state.speaker_map = None
-                    st.session_state.formatted_transcript = None
-                    st.session_state.analysis_report = None
-                    st.session_state.imported_from_file = False
-                    st.session_state.step = 2
-                    st.rerun()
+
+                st.session_state.transcription_result = result
+                st.session_state.speaker_map = None
+                st.session_state.formatted_transcript = None
+                st.session_state.analysis_report = None
+                st.session_state.imported_from_file = False
+                st.session_state.step = 2
+                st.rerun()
 
 with tab_import:
     st.caption("Load a previously exported prompt (.txt) to continue analysis or get rejection feedback.")

@@ -49,3 +49,7 @@ Desktop.ini
 
 # Test script
 test_transcribe.py
+
+# ffmpeg
+modules/ffmpeg.exe
+modules/ffprobe.exe

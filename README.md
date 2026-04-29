@@ -62,15 +62,30 @@ Interview_guide/
 
 ### 1. 安装依赖
 
-建议使用 conda 创建独立环境：
+建议使用 conda（推荐 miniforge）创建独立环境：
 
 ```bash
-conda create -n interview_guide python=3.10
+conda create -n interview_guide python=3.12 -c conda-forge
 conda activate interview_guide
+
+# 1) 先装 PyTorch 三件套（必须带 --index-url，否则找不到 cu121 wheel）
+pip install torch==2.2.2 torchaudio==2.2.2 torchvision==0.17.2 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# 2) 锁定 numpy 1.x（PyTorch 2.2.2 用 NumPy 1.x 编译，
+#    避免后续装别的包时被升级到 2.x 触发 ABI 不兼容）
+pip install numpy==1.26.4
+
+# 3) 装项目依赖
 pip install -r requirements.txt
+
+# 4) 单独装 whisperx：其包元数据声明 numpy>=2.1.0，
+#    但运行时实际兼容 numpy 1.26.4，用 --no-deps 跳过版本检查
+pip install --no-deps whisperx==3.7.6
 ```
 
 需要 NVIDIA GPU + CUDA 运行时（faster-whisper 和 pyannote 都依赖）。
+PyTorch 2.2.2 + CUDA 12.1 是经过验证的组合，请勿随意升级。
 
 ### 2. 配置 API Key
 
@@ -81,6 +96,38 @@ pip install -r requirements.txt
 - **Serper API Key**（可选）— 用于搜索公司背景，免费额度 2500 次/月
 
 Key 可以通过环境变量或 Streamlit 侧边栏输入框配置。
+
+### 3. 手动放置 ffmpeg / ffprobe（**必需**）
+
+项目通过 pydub 处理音频/视频解码，需要 `ffmpeg.exe` 和 `ffprobe.exe` 这两个二进制文件。
+由于体积较大（合计约 150 MB），它们**不随仓库上传 GitHub**，需要手动下载并放入 `modules/` 目录。
+
+**为什么不直接用 conda 装的 ffmpeg？**
+> 经测试，conda（特别是 Anaconda 主源）安装的 ffmpeg 在 Windows 上常出现 DLL 冲突
+> （报错 `gdk_pixbuf-2.0-0.dll` 找不到 `libintl_bind_textdomain_codeset` 入口点），
+> 进而导致 pydub 调用 ffprobe 失败、抛 `JSONDecodeError`。
+> 改用独立 ffmpeg 二进制是最稳妥的解决方案。
+
+**下载步骤**：
+
+1. 访问 https://www.gyan.dev/ffmpeg/builds/
+2. 下载 **ffmpeg-release-essentials.zip**（或 7z 版本）
+3. 解压后在 `bin/` 目录下找到 `ffmpeg.exe` 和 `ffprobe.exe`
+4. 把这两个文件复制到本项目的 `modules/` 目录下：
+
+```
+Interview_guide/
+└── modules/
+    ├── ffmpeg.exe       ← 必需
+    ├── ffprobe.exe      ← 必需
+    ├── transcriber.py
+    └── ...
+```
+
+`config.py` 启动时会自动检测并优先使用这两个文件，无需额外配置。
+
+> 如果两个文件没有放入 `modules/`，运行到 **Start Transcription** 步骤时会报
+> `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` 之类的解码错误。
 
 ---
 
