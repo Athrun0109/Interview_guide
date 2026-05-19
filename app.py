@@ -3,7 +3,13 @@ import streamlit as st
 from datetime import datetime
 
 from config import load_env_keys
-from modules.transcriber import transcribe_and_diarize, format_transcript, WHISPER_MODELS, SUPPORTED_LANGUAGES
+from modules.transcriber import (
+    transcribe_and_diarize,
+    format_transcript,
+    postprocess_segments,
+    WHISPER_MODELS,
+    SUPPORTED_LANGUAGES,
+)
 from modules.searcher import search_company
 from modules.analyzer import analyze_interview, GEMINI_MODELS
 from modules.prompts import AnalysisMode, determine_mode, build_exportable_prompt, parse_exported_prompt
@@ -192,8 +198,12 @@ if st.session_state.transcription_result and st.session_state.step >= 2:
                 for label in result.speaker_labels:
                     speaker_map[label] = "Candidate" if label == spk else "Interviewer"
                 st.session_state.speaker_map = speaker_map
+                cleaned_segments = postprocess_segments(
+                    result.segments,
+                    language=result.detected_language or "ja",
+                )
                 st.session_state.formatted_transcript = format_transcript(
-                    result.segments, speaker_map
+                    cleaned_segments, speaker_map
                 )
                 st.session_state.step = 3
                 st.rerun()

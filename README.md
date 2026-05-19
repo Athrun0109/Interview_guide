@@ -10,7 +10,8 @@
 
 - **语音转文字**：基于 faster-whisper / WhisperX 的 Large V3 模型，对日语、英语面试录音进行高质量转写
 - **说话人分离**：使用 pyannote.audio 3.1 进行说话人聚类，支持用户手动指定说话人数量以提升准确率
-- **重叠语音检测**：自动识别"多人同时说话"的片段并单独标记，避免将别人的声音混入某人的发言中
+- **重叠语音与误识别后处理**：在用户确认身份后，自动归并"多人同时说话"的片段、吸收 pyannote 把单个字误分给错误说话人的情况
+- **段落自动合并**：用户选完身份后，连续同角色的句子会合并成段落、自动处理重叠和误识别片段，输出 LLM 可读性更高
 - **说话人身份选择**：录音中所有说话人会被提取片段样本，用户试听后一键点选"这是我"，其余默认标记为面试官
 - **公司背景检索**（可选）：通过 Serper API 搜索目标公司信息，辅助分析上下文
 - **LLM 面试分析**：调用 Gemini 对每个问答环节进行定性评价（好/一般/不好），并给出具体改进建议
@@ -46,9 +47,10 @@
 Interview_guide/
 ├── app.py                 # Streamlit 主应用入口
 ├── config.py              # API Key 和设备配置
-├── requirements.txt       # Python 依赖
+├── requirements.txt       # Python 依赖列表（pip install -r 使用）
+├── README.md              # 本文件（环境准备与使用说明）
 ├── modules/
-│   ├── transcriber.py     # STT + 说话人分离 + 进度回调
+│   ├── transcriber.py     # STT + 说话人分离 + 进度回调 + 后处理
 │   ├── searcher.py        # Serper 公司搜索
 │   ├── analyzer.py        # Gemini 分析调用
 │   └── prompts.py         # Prompt 模板与分析模式
@@ -91,9 +93,9 @@ PyTorch 2.2.2 + CUDA 12.1 是经过验证的组合，请勿随意升级。
 
 需要以下 Key：
 
-- **Gemini API Key**（必需）— 用于面试内容分析
-- **HuggingFace Token**（必需）— 用于下载 pyannote 模型。首次使用需先在 HF 官网同意 `pyannote/speaker-diarization-3.1` 的使用协议
-- **Serper API Key**（可选）— 用于搜索公司背景，免费额度 2500 次/月
+- **HuggingFace Token**（**必需**）— 用于下载 pyannote 模型。首次使用需先在 HF 官网同意 `pyannote/speaker-diarization-3.1` 的使用协议
+- **Gemini API Key**（可选）— **仅方式 B 使用**（应用内直接分析）。如果走推荐的方式 A（导出 Prompt 到网页 LLM），完全不需要配置
+- **Serper API Key**（可选）— **仅在方式 B + 填了公司名时才会被调用**，用于搜索公司背景拼到 Prompt 里。免费额度 2500 次/月。方式 A 下不会用到
 
 Key 可以通过环境变量或 Streamlit 侧边栏输入框配置。
 
@@ -155,6 +157,10 @@ streamlit run app.py
 ### Step 2：选择"自己"
 - 试听每个说话人的样本片段
 - 点击"这是我"按钮标记出本人，其余自动标记为面试官
+- 点击后系统自动进行转录后处理：
+  - **OVERLAP 归属**：将"多人同时说话"片段并入合理的角色
+  - **单字误识别吸收**：若某段只有单个汉字/假名（或单个英语单词）且左右邻居都是同一其他角色，自动并入邻居（修复 pyannote 在 word 边界上的小错误）
+  - **段落合并**：连续同角色的多个 segment 合并为一个段落，并用「。」/「.」连接，输出更接近 QA 形式的可读文本
 
 ### Step 3：填写岗位信息
 - 公司名称（可选）
@@ -217,7 +223,17 @@ streamlit run app.py
 
 ## 已知限制
 
+- **硬件要求：基于 NVIDIA GPU + CUDA 开发**。代码中 `device="cuda"` 是硬编码，无 NVIDIA 显卡的机器（包括 Apple Silicon M 系列芯片、纯 CPU Windows/Linux 机器）无法直接运行。如需在这类机器上使用，建议在有 GPU 的机器上完成转写并导出 .txt，然后通过 Step 1 的 **Import Previous Session** 在任意机器上继续分析阶段
+- **1 小时音频/视频的处理时间预期**：
+
+  | 运行环境 | 预计耗时 | 备注 |
+  |---------|---------|------|
+  | NVIDIA GPU（RTX 3060/4060 级别以上） | 5–15 分钟 | 当前默认配置 |
+  | 纯 CPU（现代 8 核） | 2–4 小时 | 需手动改 `compute_type="int8"` 且 pyannote 在 CPU 上特别慢 |
+  | Apple Silicon（M2/M3） | 1.5–2.5 小时（理论） | 当前代码不支持，需改 device 适配；faster-whisper 只能跑 CPU，pyannote 可用 MPS |
+
 - 说话人分离在说话人声线相近时可能出错，建议提供明确的说话人数
 - Whisper 对日英混合的技术词汇偶尔会把英文强行转成片假名
 - 目前不支持实时/流式处理，需要等待整段音频处理完毕
 - 仅本地 GPU 运行，未部署云服务
+- 首次运行需自动下载约 4–5GB 模型权重（pyannote ~400MB、Whisper Large V3 ~3GB、wav2vec2 对齐模型 ~1GB），下载到 `~/.cache/huggingface/`
